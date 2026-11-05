@@ -49,6 +49,13 @@ overhead and running the translation engine without a host JIT:
   whenever a translation is invalidated, so a repeated return skips the jump
   cache probe.
 - Observation of mapped host-memory pages during TLB fills.
+- Cortex-A7 ACTLR with its reset value and Secure/Non-secure write
+  permissions (SMP writable from Non-secure only when NSACR.NS_SMP is set).
+- A bounded owner queue for accepted Cortex-A7 shared TLB maintenance
+  (`uc_embedder_tlbi_attach`, `_status`, `_ack`; `uc_embedder_features()`
+  bit 512). Each engine records the inner-shareable invalidations its guest
+  executed; the embedder delivers them to peer processors and acknowledges
+  each record before the engine runs again.
 - Stoppable Thumb instruction-entry hooks with synchronized ITSTATE, including
   instructions whose condition fails (`uc_embedder_features()` bit 4).
 - An optional Tiny Code Interpreter (TCI) backend, including Emscripten support.

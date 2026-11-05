@@ -696,6 +696,78 @@ exept:
     raise_exception(env, EXCP_UDEF, syndrome, target_el);
 }
 
+/* Observe only accepted guest writes. Host CP-register setup calls the
+ * register's raw/write callback directly and never enters this function. */
+static void arm_embedder_tlbi_complete(CPUARMState *env, const ARMCPRegInfo *ri,
+                                uint32_t value)
+{
+    struct uc_struct *uc = env->uc;
+    uc_embedder_tlbi_event event = {0};
+    bool shared, forced_local, selected;
+    uint32_t poison = 0;
+
+    if (!uc->embedder_tlbi_owner || !env_archcpu(env)->has_cortex_a7_actlr ||
+        ri->cp != 15 || ri->crn != 8) {
+        return;
+    }
+    shared =
+        (ri->crm == 3 && ri->opc1 == 0 &&
+         (ri->opc2 <= 3 || ri->opc2 == 5 || ri->opc2 == 7)) ||
+        (ri->crm == 3 && ri->opc1 == 4 &&
+         (ri->opc2 == 0 || ri->opc2 == 1 ||
+          ri->opc2 == 4 || ri->opc2 == 5)) ||
+        (ri->crm == 0 && ri->opc1 == 4 &&
+         (ri->opc2 == 1 || ri->opc2 == 5));
+    /* HCR.FB promotion is not qualified by this delivery protocol. Refuse
+     * either EL1 security state, including the backend's existing predicate. */
+    forced_local = ri->opc1 == 0 && ri->crm >= 5 && ri->crm <= 7 &&
+        arm_current_el(env) == 1 && (env->cp15.hcr_el2 & HCR_FB);
+    if (!shared && !forced_local) {
+        return;
+    }
+    selected = ri->opc1 == 0 && ri->crm == 3 && ri->opc2 == 0;
+    event.owner = uc->embedder_tlbi_owner;
+    event.sequence = uc->embedder_tlbi_next_sequence;
+    event.vttbr = env->cp15.vttbr_el2;
+    event.hcr = env->cp15.hcr_el2;
+    event.cpsr = cpsr_read(env);
+    event.scr = env->cp15.scr_el3;
+    event.nsacr = env->cp15.nsacr;
+    event.actlr = env->cp15.c1_a7actlr;
+    event.exception_level = arm_current_el(env);
+    event.secure = arm_is_secure(env);
+    event.selector = (ri->cp << 24) | (ri->crn << 16) |
+        (ri->crm << 12) | (ri->opc1 << 8) | ri->opc2;
+    event.operand = value;
+    if (!selected) {
+        poison = UC_EMBEDDER_TLBI_UNSUPPORTED;
+    } else if (uc->embedder_tlbi_count == UC_EMBEDDER_TLBI_CAPACITY) {
+        poison = UC_EMBEDDER_TLBI_OVERFLOW;
+    } else if (event.sequence == UINT64_MAX) {
+        poison = UC_EMBEDDER_TLBI_SEQUENCE_EXHAUSTED;
+    }
+    if (poison) {
+        if (!uc->embedder_tlbi_poison) {
+            uc->embedder_tlbi_poison = poison;
+            uc->embedder_tlbi_failed = event;
+        }
+        uc->invalid_error = UC_ERR_RESOURCE;
+    } else {
+        uint32_t tail = (uc->embedder_tlbi_head + uc->embedder_tlbi_count) %
+            UC_EMBEDDER_TLBI_CAPACITY;
+        uc->embedder_tlbi_queue[tail] = event;
+        uc->embedder_tlbi_count++;
+        uc->embedder_tlbi_next_sequence++;
+    }
+    if (poison || uc->embedder_tlbi_count == UC_EMBEDDER_TLBI_CAPACITY) {
+        /* Finish this CP-write TB normally, publishing its following PC.
+         * A full queue is a yield, not a guest failure. Never longjmp from
+         * here or run the following instruction before owner settlement. */
+        uc->stop_request = true;
+        cpu_exit(env_cpu(env));
+    }
+}
+
 void HELPER(set_cp_reg)(CPUARMState *env, void *rip, uint32_t value)
 {
     const ARMCPRegInfo *ri = rip;
@@ -705,6 +777,7 @@ void HELPER(set_cp_reg)(CPUARMState *env, void *rip, uint32_t value)
     } else {
         ri->writefn(env, ri, value);
     }
+    arm_embedder_tlbi_complete(env, ri, value);
 }
 
 uint32_t HELPER(get_cp_reg)(CPUARMState *env, void *rip)

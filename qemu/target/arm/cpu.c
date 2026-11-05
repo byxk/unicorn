@@ -1718,6 +1718,8 @@ static void cortex_a7_initfn(struct uc_struct *uc, CPUState *obj)
     set_feature(&cpu->env, ARM_FEATURE_EL3);
     set_feature(&cpu->env, ARM_FEATURE_PMU);
     cpu->midr = 0x410fc075;
+    cpu->has_cortex_a7_actlr = true;
+    cpu->reset_auxcr = 0x00006000; /* DDI0464F: L1PCTL=3, SMP=0. */
     cpu->reset_fpsid = 0x41023075;
     cpu->isar.mvfr0 = 0x10110222;
     cpu->isar.mvfr1 = 0x11111111;

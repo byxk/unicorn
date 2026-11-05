@@ -1105,6 +1105,13 @@ uc_err uc_emu_start(uc_engine *uc, uint64_t begin, uint64_t until,
 {
     uc_err err;
 
+    if (uc->embedder_tlbi_owner &&
+        (uc->nested_level || uc->embedder_tlbi_count ||
+         uc->embedder_tlbi_poison)) {
+        return UC_ERR_RESOURCE;
+    }
+    uc->embedder_ever_executed = true;
+
     // reset the counter
     uc->emu_counter = 0;
     uc->invalid_error = UC_ERR_OK;
@@ -2393,6 +2400,9 @@ size_t uc_context_size(uc_engine *uc)
 UNICORN_EXPORT
 uc_err uc_context_save(uc_engine *uc, uc_context *context)
 {
+    if (uc->embedder_tlbi_owner) {
+        return UC_ERR_RESOURCE;
+    }
     UC_INIT(uc);
     uc_err ret = UC_ERR_OK;
 
@@ -2677,6 +2687,9 @@ uc_err uc_context_reg_read_batch2(uc_context *ctx, int const *regs,
 UNICORN_EXPORT
 uc_err uc_context_restore(uc_engine *uc, uc_context *context)
 {
+    if (uc->embedder_tlbi_owner) {
+        return UC_ERR_RESOURCE;
+    }
     UC_INIT(uc);
     uc_err ret;
 
@@ -3354,10 +3367,65 @@ uc_err uc_embedder_request_restart(uc_engine *uc)
 // 32: filter decision 3 replaces an ARM instruction with its code hook.
 // 64: the A64 frontend supports the translation filter and block accounting.
 // 128: translated blocks count guest instructions in CPUState.
+// 256: fast ARM blocks debit the coarse interactive budget in translated code.
+// 512: ABI-1 Cortex-A7 accepted-TLBI owner queue.
 UNICORN_EXPORT
 uint32_t uc_embedder_features(void)
 {
-    return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256;
+    return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512;
+}
+
+UNICORN_EXPORT
+uc_err uc_embedder_tlbi_attach(uc_engine *uc, uint32_t abi, uint64_t owner)
+{
+    if (abi != UC_EMBEDDER_TLBI_ABI || !owner ||
+        uc->arch != UC_ARCH_ARM || uc->cpu_model != UC_CPU_ARM_CORTEX_A7 ||
+        uc->nested_level || uc->embedder_ever_executed ||
+        uc->embedder_tlbi_owner) {
+        return UC_ERR_ARG;
+    }
+    UC_INIT(uc);
+    uc->embedder_tlbi_owner = owner;
+    uc->embedder_tlbi_next_sequence = 1;
+    restore_jit_state(uc);
+    return UC_ERR_OK;
+}
+
+UNICORN_EXPORT
+uc_err uc_embedder_tlbi_status(uc_engine *uc, uint32_t abi,
+                              uc_embedder_tlbi_info *info)
+{
+    if (abi != UC_EMBEDDER_TLBI_ABI || !info || uc->nested_level) {
+        return UC_ERR_ARG;
+    }
+    memset(info, 0, sizeof(*info));
+    info->owner = uc->embedder_tlbi_owner;
+    info->next_sequence = uc->embedder_tlbi_next_sequence;
+    info->pending = uc->embedder_tlbi_count;
+    info->poison = uc->embedder_tlbi_poison;
+    if (info->pending) {
+        info->front = uc->embedder_tlbi_queue[uc->embedder_tlbi_head];
+    }
+    info->failed = uc->embedder_tlbi_failed;
+    return UC_ERR_OK;
+}
+
+UNICORN_EXPORT
+uc_err uc_embedder_tlbi_ack(uc_engine *uc, uint32_t abi, uint64_t owner,
+                           uint64_t sequence)
+{
+    if (abi != UC_EMBEDDER_TLBI_ABI || !owner ||
+        uc->embedder_tlbi_owner != owner || uc->nested_level ||
+        uc->embedder_tlbi_poison || !uc->embedder_tlbi_count ||
+        uc->embedder_tlbi_queue[uc->embedder_tlbi_head].sequence != sequence) {
+        return UC_ERR_ARG;
+    }
+    memset(&uc->embedder_tlbi_queue[uc->embedder_tlbi_head], 0,
+           sizeof(uc_embedder_tlbi_event));
+    uc->embedder_tlbi_head =
+        (uc->embedder_tlbi_head + 1) % UC_EMBEDDER_TLBI_CAPACITY;
+    uc->embedder_tlbi_count--;
+    return UC_ERR_OK;
 }
 
 // Select parallel TCG translation semantics for this engine. The caller must

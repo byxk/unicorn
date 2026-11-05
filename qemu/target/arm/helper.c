@@ -227,6 +227,31 @@ static CPAccessResult access_tsw(CPUARMState *env, const ARMCPRegInfo *ri,
     return CP_ACCESS_OK;
 }
 
+/* Cortex-A7 MPCore TRM DDI0464F, 4.3.31/Table 4-60. */
+#define CORTEX_A7_ACTLR_MASK 0x1000fc40u
+#define CORTEX_A7_ACTLR_SMP (1u << 6)
+#define CORTEX_A7_NSACR_NS_SMP (1u << 18)
+
+static void cortex_a7_actlr_raw_write(CPUARMState *env,
+                                     const ARMCPRegInfo *ri, uint64_t value)
+{
+    /* Raw setup/restore is not a guest access; still preserve RAZ/WI bits. */
+    env->cp15.c1_a7actlr = value & CORTEX_A7_ACTLR_MASK;
+}
+
+static void cortex_a7_actlr_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                                 uint64_t value)
+{
+    uint32_t mask = CORTEX_A7_ACTLR_MASK;
+
+    if (!arm_is_secure(env)) {
+        /* DDI0464F 4.3.34: denied Non-secure writes are ignored. */
+        mask = (env->cp15.nsacr & CORTEX_A7_NSACR_NS_SMP)
+            ? CORTEX_A7_ACTLR_SMP : 0;
+    }
+    env->cp15.c1_a7actlr = (env->cp15.c1_a7actlr & ~mask) | (value & mask);
+}
+
 /* Check for traps from EL1 due to HCR_EL2.TACR.  */
 static CPAccessResult access_tacr(CPUARMState *env, const ARMCPRegInfo *ri,
                                   bool isread)
@@ -7330,6 +7355,18 @@ void register_cp_regs_for_features(ARMCPU *cpu)
               .resetvalue = 0 },
             REGINFO_SENTINEL
         };
+        if (cpu->has_cortex_a7_actlr) {
+            /* A7 is AArch32-only: do not reset/read a uint32_t as STATE_BOTH. */
+            auxcr_reginfo[0] = (ARMCPRegInfo) {
+                .name = "ACTLR", .state = ARM_CP_STATE_AA32,
+                .cp = 15, .opc1 = 0, .crn = 1, .crm = 0, .opc2 = 1,
+                .access = PL1_RW, .accessfn = access_tacr,
+                .fieldoffset = offsetof(CPUARMState, cp15.c1_a7actlr),
+                .resetvalue = cpu->reset_auxcr,
+                .writefn = cortex_a7_actlr_write,
+                .raw_writefn = cortex_a7_actlr_raw_write,
+            };
+        }
         define_arm_cp_regs(cpu, auxcr_reginfo);
         if (cpu_isar_feature(aa32_ac2, cpu)) {
             define_arm_cp_regs(cpu, actlr2_hactlr2_reginfo);

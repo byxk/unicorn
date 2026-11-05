@@ -294,6 +294,16 @@ typedef struct uc_backing_observer {
 #define UC_BACKING_OBSERVERS 32
 
 struct uc_struct {
+    /* Owner obligations are not architectural CPU context and cannot be
+     * copied away by a register snapshot. Zero means unattached. */
+    uint64_t embedder_tlbi_owner;
+    uint64_t embedder_tlbi_next_sequence;
+    uint32_t embedder_tlbi_head;
+    uint32_t embedder_tlbi_count;
+    uint32_t embedder_tlbi_poison;
+    bool embedder_ever_executed;
+    uc_embedder_tlbi_event embedder_tlbi_queue[UC_EMBEDDER_TLBI_CAPACITY];
+    uc_embedder_tlbi_event embedder_tlbi_failed;
     uc_arch arch;
     uc_mode mode;
     uc_err errnum; // qemu/cpu-exec.c

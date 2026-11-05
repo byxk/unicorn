@@ -279,6 +279,7 @@ typedef struct CPUARMState {
         uint64_t cpacr_el1; /* Architectural feature access control register */
         uint64_t cptr_el[4];  /* ARMv8 feature trap registers */
         uint32_t c1_xscaleauxcr; /* XScale auxiliary control register.  */
+        uint32_t c1_a7actlr; /* Cortex-A7 ACTLR, common to Secure/Non-secure. */
         uint64_t sder; /* Secure debug enable register. */
         uint32_t nsacr; /* Non-secure access control register. */
         union { /* MMU translation table base 0. */
@@ -878,6 +879,7 @@ struct ARMCPU {
     uint64_t ccsidr[16];
     uint64_t reset_cbar;
     uint32_t reset_auxcr;
+    bool has_cortex_a7_actlr; /* Model capability, preserved across reset. */
     bool reset_hivecs;
     /* DCZ blocksize, in log_2(words), ie low 4 bits of DCZID_EL0 */
     uint32_t dcz_blocksize;

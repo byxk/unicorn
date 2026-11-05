@@ -1449,6 +1449,49 @@ size_t uc_context_size(uc_engine *uc);
 UNICORN_EXPORT
 uc_err uc_context_free(uc_context *context);
 
+/* Serialized Cortex-A7 owner delivery, ABI 1. Attachment is irreversible and
+ * must precede the first execution. These records describe accepted guest
+ * maintenance whose local effect completed; they do not assert peer delivery.
+ * The owner must settle and acknowledge every record before running again.
+ * Status and acknowledgment require a stopped engine. No context save/restore
+ * is supported on attached engines. All fields have fixed widths. */
+#define UC_EMBEDDER_TLBI_ABI 1
+#define UC_EMBEDDER_TLBI_CAPACITY 64
+#define UC_EMBEDDER_TLBI_OVERFLOW 1
+#define UC_EMBEDDER_TLBI_SEQUENCE_EXHAUSTED 2
+#define UC_EMBEDDER_TLBI_UNSUPPORTED 3
+typedef struct uc_embedder_tlbi_event {
+    uint64_t owner;
+    uint64_t sequence;
+    uint64_t vttbr;
+    uint64_t hcr;
+    uint32_t cpsr;
+    uint32_t scr;
+    uint32_t nsacr;
+    uint32_t actlr;
+    uint32_t exception_level;
+    uint32_t secure;
+    /* cp:31..24, crn:23..16, crm:15..12, opc1:11..8, opc2:7..0 */
+    uint32_t selector;
+    uint32_t operand;
+} uc_embedder_tlbi_event;
+typedef struct uc_embedder_tlbi_info {
+    uint64_t owner;
+    uint64_t next_sequence;
+    uint32_t pending;
+    uint32_t poison;
+    uc_embedder_tlbi_event front;
+    uc_embedder_tlbi_event failed;
+} uc_embedder_tlbi_info;
+UNICORN_EXPORT
+uc_err uc_embedder_tlbi_attach(uc_engine *uc, uint32_t abi, uint64_t owner);
+UNICORN_EXPORT
+uc_err uc_embedder_tlbi_status(uc_engine *uc, uint32_t abi,
+                              uc_embedder_tlbi_info *info);
+UNICORN_EXPORT
+uc_err uc_embedder_tlbi_ack(uc_engine *uc, uint32_t abi, uint64_t owner,
+                           uint64_t sequence);
+
 #ifdef __cplusplus
 }
 #endif
