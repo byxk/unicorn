@@ -171,7 +171,7 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
         ops->pc_sync(db, cpu);
         prev_op = tcg_last_op(tcg_ctx);
         block_hook = true;
-        if (uc->embedder_insn_filter && !uc->embedder_legacy_block_accounting) {
+        if (uc->embedder_insn_filter) {
             gen_embedder_block_guard(tcg_ctx, uc, db->pc_first, &embedder_guard);
         } else {
             gen_uc_tracecode(tcg_ctx, 0xf8f8f8f8, UC_HOOK_BLOCK_IDX, uc,

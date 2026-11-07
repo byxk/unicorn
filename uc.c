@@ -2224,17 +2224,19 @@ void helper_uc_tracecode(int32_t size, uc_hook_idx index, void *handle,
         return;
     }
 
-    // embedder: budgeted block accounting (see uc_priv.h embedder_acct)
-    if (index == UC_HOOK_BLOCK_IDX && (size & 0x40000000) && uc->embedder_acct.enabled) {
+    // embedder: exact block accounting keeps its ring write in this helper.
+    // Coarse interactive accounting is debited by the translated guard, so a
+    // fast block that reaches this helper has already run out of budget and
+    // needs the embedder's own settlement.
+    if (index == UC_HOOK_BLOCK_IDX && (size & 0x40000000) &&
+        uc->embedder_acct.enabled == 1) {
         int64_t count = (size & 0x3fffffff) >> 2;
         if (uc->embedder_acct.budget >= count &&
-            (uc->embedder_acct.enabled != 1 ||
-             (address >= 0 && (uint64_t)address + (size & 0x3fffffff) <= (UINT64_C(1) << 32)))) {
+            address >= 0 &&
+            (uint64_t)address + (size & 0x3fffffff) <= (UINT64_C(1) << 32)) {
             uc->embedder_acct.budget -= count;
-            if (uc->embedder_acct.enabled == 1) {
-                uc->embedder_acct.ring[uc->embedder_acct.head++ & uc->embedder_acct.mask] =
-                    ((uint64_t)(uint32_t)address << 32) | (uint64_t)count;
-            }
+            uc->embedder_acct.ring[uc->embedder_acct.head++ & uc->embedder_acct.mask] =
+                ((uint64_t)(uint32_t)address << 32) | (uint64_t)count;
             return;
         }
     }
@@ -3356,21 +3358,6 @@ UNICORN_EXPORT
 uint32_t uc_embedder_features(void)
 {
     return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256;
-}
-
-// embedder: select the legacy per-block accounting helper. Translations carry
-// the selected path, so changing it flushes them.
-UNICORN_EXPORT
-uc_err uc_embedder_set_legacy_block_accounting(uc_engine *uc, bool enabled)
-{
-    UC_INIT(uc);
-    if (uc->embedder_legacy_block_accounting != enabled) {
-        uc->embedder_legacy_block_accounting = enabled;
-        uc->cpu->cflags_next_tb = -1;
-        uc->tb_flush(uc);
-    }
-    restore_jit_state(uc);
-    return UC_ERR_OK;
 }
 
 // Select parallel TCG translation semantics for this engine. The caller must

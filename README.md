@@ -38,8 +38,9 @@ overhead and running the translation engine without a host JIT:
 - Budgeted block accounting with an embedder-owned trace ring.
 - Translated coarse block accounting: fast ARM blocks debit the interactive
   budget and test asynchronous pauses in generated code
-  (`uc_embedder_features()` bit 256). `uc_embedder_set_legacy_block_accounting`
-  selects the earlier helper path; changing it flushes translations.
+  (`uc_embedder_features()` bit 256). Exact accounting keeps its ring write
+  in the block helper; a fast block enters that helper only once its budget
+  runs out or a pause arrives.
 - `FUJIMOD_PERF_MAP` writes a perf-map line for every installed translation,
   for host profilers and Samply. Set it to a path or `1` for
   `/tmp/perf-PID.map`; entries flush periodically and at process exit.

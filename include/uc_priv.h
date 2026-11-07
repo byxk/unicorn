@@ -495,14 +495,12 @@ struct uc_struct {
     // per-access helpers; exact mode keeps the memory-access exit checks.
     bool embedder_block_exits;
     bool embedder_instruction_counter;
-    // embedder: select the pre-inline budget helper instead of translated
-    // budget accounting. Equivalence checks compare the two paths.
-    bool embedder_legacy_block_accounting;
-    // embedder: budgeted block accounting (uc_embedder_accounting). A block translated
-    // as "fast" (block hook size bit 30) whose instruction count fits in
-    // `budget` is entered without calling hooks: the count is subtracted. With
-    // `enabled == 1`, (start << 32 | count) is also pushed to the ring; with
-    // `enabled == 2`, the ring is not written.
+    // embedder: budgeted block accounting (uc_embedder_accounting). A block
+    // translated as fast (block hook size bit 30) runs without calling hooks:
+    // the translator subtracts its instruction count from the budget and only
+    // enters this helper when the budget runs out or a pause arrives. With
+    // enabled == 1 the helper also pushes (start << 32 | count) to the ring;
+    // with enabled == 2 the ring is not written.
     struct {
         int64_t budget;
         uint64_t head;
