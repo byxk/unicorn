@@ -520,6 +520,8 @@ uc_err uc_close(uc_engine *uc)
     int i;
     MemoryRegion *mr;
 
+    uc_embedder_perf_map_flush();
+
     if (!uc->init_done) {
         free(uc);
         return UC_ERR_OK;
@@ -3355,7 +3357,22 @@ uc_err uc_embedder_request_restart(uc_engine *uc)
 UNICORN_EXPORT
 uint32_t uc_embedder_features(void)
 {
-    return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128;
+    return 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256;
+}
+
+// embedder: select the legacy per-block accounting helper. Translations carry
+// the selected path, so changing it flushes them.
+UNICORN_EXPORT
+uc_err uc_embedder_set_legacy_block_accounting(uc_engine *uc, bool enabled)
+{
+    UC_INIT(uc);
+    if (uc->embedder_legacy_block_accounting != enabled) {
+        uc->embedder_legacy_block_accounting = enabled;
+        uc->cpu->cflags_next_tb = -1;
+        uc->tb_flush(uc);
+    }
+    restore_jit_state(uc);
+    return UC_ERR_OK;
 }
 
 // Select parallel TCG translation semantics for this engine. The caller must

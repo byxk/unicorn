@@ -36,6 +36,59 @@
 #include "sysemu/tcg.h"
 #include "uc_priv.h"
 
+/*
+ * embedder: FUJIMOD_PERF_MAP writes one perf-map line per installed
+ * translation so host profilers can attribute samples to guest blocks. The
+ * value is either a path or "1" for /tmp/perf-PID.map. Writes are buffered
+ * and flushed periodically and at exit.
+ */
+static FILE *uc_perf_map;
+static bool uc_perf_map_opened;
+static unsigned uc_perf_map_pending;
+
+void uc_embedder_perf_map_flush(void)
+{
+    if (uc_perf_map) {
+        fflush(uc_perf_map);
+    }
+}
+
+static void uc_embedder_perf_map_open(void)
+{
+    const char *value = getenv("FUJIMOD_PERF_MAP");
+    char path[4096];
+
+    if (!value || !*value) {
+        return;
+    }
+    if (strcmp(value, "1") == 0) {
+        snprintf(path, sizeof(path), "/tmp/perf-%ld.map", (long)getpid());
+    } else {
+        snprintf(path, sizeof(path), "%s", value);
+    }
+    uc_perf_map = fopen(path, "a");
+    if (uc_perf_map) {
+        atexit(uc_embedder_perf_map_flush);
+    }
+}
+
+static void uc_embedder_perf_map_record(uintptr_t start, size_t size,
+                                        target_ulong pc)
+{
+    if (!uc_perf_map_opened) {
+        uc_perf_map_opened = true;
+        uc_embedder_perf_map_open();
+    }
+    if (uc_perf_map) {
+        fprintf(uc_perf_map, "%" PRIxPTR " %zx guest_%08" PRIx64 "\n",
+                start, size, (uint64_t)pc);
+        if (++uc_perf_map_pending >= 1024) {
+            uc_perf_map_pending = 0;
+            fflush(uc_perf_map);
+        }
+    }
+}
+
 static bool tb_exec_is_locked(struct uc_struct*);
 static void tb_exec_change(struct uc_struct*, bool locked);
 
@@ -1883,6 +1936,8 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
         return existing_tb;
     }
     tcg_tb_insert(tcg_ctx, tb);
+    uc_embedder_perf_map_record((uintptr_t)gen_code_buf, (size_t)gen_code_size,
+                                pc);
     return tb;
 }
 

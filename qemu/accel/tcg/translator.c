@@ -32,6 +32,99 @@ void translator_loop_temp_check(DisasContextBase *db)
 #endif
 }
 
+/*
+ * embedder: budget accounting inside translated code. Fast ARM blocks load
+ * the interactive budget, subtract their instruction count and fall through;
+ * a miss or a slow block enters the ordinary helper, which owns pause,
+ * exact-policy ring writes, hook dispatch and refusal. The fast flag, the
+ * instruction count and the helper's size immediate are patched after the
+ * block is translated, when its instruction set and observers are known.
+ */
+struct EmbedderBlockGuard {
+    TCGOp *fast;
+    TCGOp *count_low;
+    TCGOp *count_high;
+    TCGOp *size;
+    TCGv_i32 fast_value;
+    TCGv_i64 count_value;
+    bool active;
+};
+
+static void gen_embedder_block_guard(TCGContext *tcg_ctx,
+                                     struct uc_struct *uc, target_ulong pc,
+                                     struct EmbedderBlockGuard *guard)
+{
+    TCGLabel *helper = gen_new_label(tcg_ctx);
+    TCGLabel *body = gen_new_label(tcg_ctx);
+    TCGLabel *pause_checked = gen_new_label(tcg_ctx);
+    TCGOp *before_helper;
+
+    guard->active = true;
+    guard->fast_value = tcg_const_i32(tcg_ctx, 1);
+    guard->fast = tcg_last_op(tcg_ctx);
+    tcg_gen_brcondi_i32(tcg_ctx, TCG_COND_EQ, guard->fast_value, 0, helper);
+
+    // A pending stop is handled by the block-entry exit test; it must not be
+    // debited as an executed block.
+    TCGv_i32 stop = tcg_temp_new_i32(tcg_ctx);
+    TCGv_ptr ucp = tcg_const_ptr(tcg_ctx, uc);
+    tcg_gen_ld8u_i32(tcg_ctx, stop, ucp, offsetof(struct uc_struct, stop_request));
+    tcg_temp_free_ptr(tcg_ctx, ucp);
+    tcg_gen_brcondi_i32(tcg_ctx, TCG_COND_NE, stop, 0, body);
+
+    TCGv_ptr pause_requested = tcg_temp_local_new_ptr(tcg_ctx);
+    ucp = tcg_const_ptr(tcg_ctx, uc);
+    tcg_gen_ld_ptr(tcg_ctx, pause_requested, ucp,
+                   offsetof(struct uc_struct, embedder_acct.pause_requested));
+    tcg_temp_free_ptr(tcg_ctx, ucp);
+    tcg_gen_brcondi_ptr(tcg_ctx, TCG_COND_EQ, pause_requested, 0, pause_checked);
+    TCGv_i32 paused = tcg_temp_new_i32(tcg_ctx);
+    tcg_gen_ld_i32(tcg_ctx, paused, pause_requested, 0);
+    tcg_gen_brcondi_i32(tcg_ctx, TCG_COND_NE, paused, 0, helper);
+    gen_set_label(tcg_ctx, pause_checked);
+
+    // Exact accounting keeps its ring write in the helper. Coarse interactive
+    // accounting is the only mode translated inline.
+    TCGv_i64 enabled = tcg_temp_new_i64(tcg_ctx);
+    ucp = tcg_const_ptr(tcg_ctx, uc);
+    tcg_gen_ld_i64(tcg_ctx, enabled, ucp,
+                   offsetof(struct uc_struct, embedder_acct.enabled));
+    tcg_temp_free_ptr(tcg_ctx, ucp);
+    tcg_gen_brcondi_i64(tcg_ctx, TCG_COND_NE, enabled, 2, helper);
+
+    guard->count_value = tcg_temp_new_i64(tcg_ctx);
+#if TCG_TARGET_REG_BITS == 32
+    tcg_gen_movi_i32(tcg_ctx, TCGV_LOW(tcg_ctx, guard->count_value), 0);
+    guard->count_low = tcg_last_op(tcg_ctx);
+    tcg_gen_movi_i32(tcg_ctx, TCGV_HIGH(tcg_ctx, guard->count_value), 0);
+    guard->count_high = tcg_last_op(tcg_ctx);
+#else
+    tcg_gen_movi_i64(tcg_ctx, guard->count_value, 0);
+    guard->count_low = tcg_last_op(tcg_ctx);
+    guard->count_high = NULL;
+#endif
+
+    TCGv_i64 budget = tcg_temp_local_new_i64(tcg_ctx);
+    ucp = tcg_const_ptr(tcg_ctx, uc);
+    tcg_gen_ld_i64(tcg_ctx, budget, ucp,
+                   offsetof(struct uc_struct, embedder_acct.budget));
+    tcg_temp_free_ptr(tcg_ctx, ucp);
+    tcg_gen_sub_i64(tcg_ctx, budget, budget, guard->count_value);
+    tcg_gen_brcondi_i64(tcg_ctx, TCG_COND_LT, budget, 0, helper);
+    ucp = tcg_const_ptr(tcg_ctx, uc);
+    tcg_gen_st_i64(tcg_ctx, budget, ucp,
+                   offsetof(struct uc_struct, embedder_acct.budget));
+    tcg_temp_free_ptr(tcg_ctx, ucp);
+    tcg_gen_br(tcg_ctx, body);
+
+    gen_set_label(tcg_ctx, helper);
+    before_helper = tcg_last_op(tcg_ctx);
+    gen_uc_tracecode(tcg_ctx, 0xf8f8f8f8, UC_HOOK_BLOCK_IDX, (void *)uc, pc);
+    guard->size = before_helper ? QTAILQ_NEXT(before_helper, link)
+                                : QTAILQ_FIRST(&tcg_ctx->ops);
+    gen_set_label(tcg_ctx, body);
+}
+
 void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
                      CPUState *cpu, TranslationBlock *tb, int max_insns)
 {
@@ -40,6 +133,7 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
     TCGContext *tcg_ctx = uc->tcg_ctx;
     TCGOp *prev_op = NULL;
     bool block_hook = false;
+    struct EmbedderBlockGuard embedder_guard = { 0 };
 
     /* Initialize DisasContext */
     db->tb = tb;
@@ -77,7 +171,12 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
         ops->pc_sync(db, cpu);
         prev_op = tcg_last_op(tcg_ctx);
         block_hook = true;
-        gen_uc_tracecode(tcg_ctx, 0xf8f8f8f8, UC_HOOK_BLOCK_IDX, uc, db->pc_first);
+        if (uc->embedder_insn_filter && !uc->embedder_legacy_block_accounting) {
+            gen_embedder_block_guard(tcg_ctx, uc, db->pc_first, &embedder_guard);
+        } else {
+            gen_uc_tracecode(tcg_ctx, 0xf8f8f8f8, UC_HOOK_BLOCK_IDX, uc,
+                             db->pc_first);
+        }
     }
 
     // tcg_dump_ops(tcg_ctx, false, "translator loop");
@@ -182,7 +281,9 @@ _end_loop:
         TCGOp *tcg_op;
 
         // Unicorn: patch the callback to have the proper block size.
-        if (prev_op) {
+        if (embedder_guard.active) {
+            tcg_op = embedder_guard.size;
+        } else if (prev_op) {
             // As explained further up in the function where prev_op is
             // assigned, we move forward in the tail queue, so we're modifying the
             // move instruction generated by gen_uc_tracecode() that contains
@@ -211,6 +312,17 @@ _end_loop:
         // without hooks after translation has installed any code-write watches.
         if (uc->embedder_insn_filter && !uc->embedder_tb_thumb && !uc->embedder_tb_slow) {
             tcg_op->args[1] |= 0x40000000u;
+        }
+        if (embedder_guard.active) {
+            bool fast = !uc->embedder_tb_thumb && !uc->embedder_tb_slow &&
+                        (uint64_t)db->pc_first + db->tb->size <=
+                            (UINT64_C(1) << 32);
+            tcg_set_insn_param(embedder_guard.fast, 1, fast ? 1 : 0);
+            tcg_set_insn_param(embedder_guard.count_low, 1,
+                               (uint32_t)(db->tb->size / 4));
+            if (embedder_guard.count_high) {
+                tcg_set_insn_param(embedder_guard.count_high, 1, 0);
+            }
         }
     }
 }

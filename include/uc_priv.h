@@ -495,6 +495,9 @@ struct uc_struct {
     // per-access helpers; exact mode keeps the memory-access exit checks.
     bool embedder_block_exits;
     bool embedder_instruction_counter;
+    // embedder: select the pre-inline budget helper instead of translated
+    // budget accounting. Equivalence checks compare the two paths.
+    bool embedder_legacy_block_accounting;
     // embedder: budgeted block accounting (uc_embedder_accounting). A block translated
     // as "fast" (block hook size bit 30) whose instruction count fits in
     // `budget` is entered without calling hooks: the count is subtracted. With
@@ -527,6 +530,9 @@ struct uc_context {
     FlatView *fv;         // The current flatview of the memory
     QEMU_ALIGN(16, char data[0]); // CPU state copies require 16-byte alignment.
 };
+
+/* Host perf-map output selected by FUJIMOD_PERF_MAP, flushed at process exit. */
+void uc_embedder_perf_map_flush(void);
 
 QEMU_BUILD_BUG_ON(offsetof(struct uc_context, data) % 16 != 0);
 
