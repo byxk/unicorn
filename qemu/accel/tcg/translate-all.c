@@ -46,7 +46,7 @@ static FILE *uc_perf_map;
 static bool uc_perf_map_opened;
 static unsigned uc_perf_map_pending;
 
-void uc_embedder_perf_map_flush(void)
+static void uc_embedder_perf_map_flush(void)
 {
     if (uc_perf_map) {
         fflush(uc_perf_map);

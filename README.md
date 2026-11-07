@@ -36,6 +36,13 @@ overhead and running the translation engine without a host JIT:
   instruction with its code hook, which then performs it inside translated code
   (`uc_embedder_features()` bit 32).
 - Budgeted block accounting with an embedder-owned trace ring.
+- Translated coarse block accounting: fast ARM blocks debit the interactive
+  budget and test asynchronous pauses in generated code
+  (`uc_embedder_features()` bit 256). `uc_embedder_set_legacy_block_accounting`
+  selects the earlier helper path; changing it flushes translations.
+- `FUJIMOD_PERF_MAP` writes a perf-map line for every installed translation,
+  for host profilers and Samply. Set it to a path or `1` for
+  `/tmp/perf-PID.map`; entries flush periodically and at process exit.
 - Observation of mapped host-memory pages during TLB fills.
 - Stoppable Thumb instruction-entry hooks with synchronized ITSTATE, including
   instructions whose condition fails (`uc_embedder_features()` bit 4).

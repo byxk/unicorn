@@ -531,9 +531,6 @@ struct uc_context {
     QEMU_ALIGN(16, char data[0]); // CPU state copies require 16-byte alignment.
 };
 
-/* Host perf-map output selected by FUJIMOD_PERF_MAP, flushed at process exit. */
-void uc_embedder_perf_map_flush(void);
-
 QEMU_BUILD_BUG_ON(offsetof(struct uc_context, data) % 16 != 0);
 
 // We have to support 32bit system so we can't hold uint64_t on void*

@@ -520,8 +520,6 @@ uc_err uc_close(uc_engine *uc)
     int i;
     MemoryRegion *mr;
 
-    uc_embedder_perf_map_flush();
-
     if (!uc->init_done) {
         free(uc);
         return UC_ERR_OK;
