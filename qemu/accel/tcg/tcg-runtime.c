@@ -152,11 +152,35 @@ void *HELPER(lookup_tb_ptr)(CPUArchState *env)
     target_ulong cs_base, pc;
     uint32_t flags;
     struct uc_struct *uc = (struct uc_struct *)cpu->uc;
+    uint32_t cf_mask;
+    uint64_t epoch = uc->embedder_tb_epoch;
+    unsigned slot;
 
-    tb = tb_lookup__cpu_state(cpu, &pc, &cs_base, &flags, curr_cflags(cpu));
+    cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
+    cf_mask = (curr_cflags(cpu) & ~CF_CLUSTER_MASK) |
+              ((uint32_t)cpu->cluster_index << CF_CLUSTER_SHIFT);
+    slot = (unsigned)((pc >> 2) & (UC_EMBEDDER_TARGET_CACHE_SIZE - 1));
+    if (likely(cpu->embedder_target_cache[slot].valid &&
+               cpu->embedder_target_cache[slot].epoch == epoch &&
+               cpu->embedder_target_cache[slot].pc == pc &&
+               cpu->embedder_target_cache[slot].cs_base == cs_base &&
+               cpu->embedder_target_cache[slot].flags == flags &&
+               cpu->embedder_target_cache[slot].cf_mask == cf_mask)) {
+        return (void *)(uintptr_t)cpu->embedder_target_cache[slot].code;
+    }
+
+    tb = tb_lookup__state(cpu, pc, cs_base, flags, cf_mask);
     if (tb == NULL) {
+        cpu->embedder_target_cache[slot].valid = 0;
         return uc->tcg_ctx->code_gen_epilogue;
     }
+    cpu->embedder_target_cache[slot].pc = pc;
+    cpu->embedder_target_cache[slot].cs_base = cs_base;
+    cpu->embedder_target_cache[slot].flags = flags;
+    cpu->embedder_target_cache[slot].cf_mask = cf_mask;
+    cpu->embedder_target_cache[slot].code = (uint64_t)(uintptr_t)tb->tc.ptr;
+    cpu->embedder_target_cache[slot].epoch = epoch;
+    cpu->embedder_target_cache[slot].valid = 1;
     return tb->tc.ptr;
 }
 

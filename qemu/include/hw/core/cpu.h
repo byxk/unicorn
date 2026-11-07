@@ -290,6 +290,20 @@ struct CPUState {
     /* Accessed in parallel; all accesses must be atomic */
     struct TranslationBlock *tb_jmp_cache[TB_JMP_CACHE_SIZE];
 
+    /* Embedder: recently resolved indirect targets, keyed by the same
+     * (pc, cs_base, flags) the block lookup compares. */
+#define UC_EMBEDDER_TARGET_CACHE_SIZE 128
+    struct {
+        uint64_t pc;
+        uint64_t cs_base;
+        uint64_t code;
+        uint64_t epoch;
+        uint32_t flags;
+        uint32_t cf_mask;
+        uint32_t valid;
+        uint32_t pad;
+    } embedder_target_cache[UC_EMBEDDER_TARGET_CACHE_SIZE];
+
     QTAILQ_ENTRY(CPUState) node;
 
     /* ice debug support */
@@ -336,6 +350,9 @@ static inline void cpu_tb_jmp_cache_clear(CPUState *cpu)
 
     for (i = 0; i < TB_JMP_CACHE_SIZE; i++) {
         cpu->tb_jmp_cache[i] = NULL;
+    }
+    for (i = 0; i < UC_EMBEDDER_TARGET_CACHE_SIZE; i++) {
+        cpu->embedder_target_cache[i].valid = 0;
     }
 }
 

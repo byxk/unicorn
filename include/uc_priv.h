@@ -517,6 +517,8 @@ struct uc_struct {
     uint64_t embedder_exit_counters[UC_EXIT_COUNTER_COUNT];
     unsigned embedder_exit_site;
     bool tci_return_pending; // TCI helper asks for an unchained return
+    /* Bumped whenever a translation dies, so cached targets can be dropped. */
+    uint64_t embedder_tb_epoch;
 };
 
 // Metadata stub for the variable-size cpu context used with uc_context_*()

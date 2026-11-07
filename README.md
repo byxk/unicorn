@@ -43,6 +43,10 @@ overhead and running the translation engine without a host JIT:
 - `FUJIMOD_PERF_MAP` writes a perf-map line for every installed translation,
   for host profilers and Samply. Set it to a path or `1` for
   `/tmp/perf-PID.map`; entries flush periodically and at process exit.
+- Indirect branches remember their last target per processor. The entry is
+  keyed by the same block-state word the block lookup compares and dropped
+  whenever a translation is invalidated, so a repeated return skips the jump
+  cache probe.
 - Observation of mapped host-memory pages during TLB fills.
 - Stoppable Thumb instruction-entry hooks with synchronized ITSTATE, including
   instructions whose condition fails (`uc_embedder_features()` bit 4).

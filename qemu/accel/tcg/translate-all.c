@@ -1564,6 +1564,8 @@ static void do_tb_phys_invalidate(TCGContext *tcg_ctx, TranslationBlock *tb, boo
     bool code_gen_locked;
 
     uc->embedder_exit_counters[UC_COUNT_TRANSLATION_INVALIDATIONS]++;
+    /* Cached indirect targets may name this translation. */
+    uc->embedder_tb_epoch++;
     assert_memory_lock();
     code_gen_locked = tb_exec_is_locked(uc);
     tb_exec_unlock(uc);
