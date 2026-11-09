@@ -280,6 +280,7 @@ enum uc_embedder_exit_counter {
     // instruction-count limit, whole-cache flushes and invalidated blocks.
     UC_COUNT_TRANSLATIONS, UC_COUNT_LIMITED_TRANSLATIONS,
     UC_COUNT_TRANSLATION_FLUSHES, UC_COUNT_TRANSLATION_INVALIDATIONS,
+    UC_COUNT_TB_RESTORE_LOOKUPS, UC_COUNT_TB_RESTART_LOOKUPS,
     UC_EXIT_COUNTER_COUNT
 };
 

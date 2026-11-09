@@ -402,6 +402,7 @@ bool cpu_restore_state(CPUState *cpu, uintptr_t host_pc, bool will_exit)
     check_offset = host_pc - (uintptr_t) uc->tcg_ctx->code_gen_buffer;
 
     if (check_offset < uc->tcg_ctx->code_gen_buffer_size) {
+        uc->embedder_exit_counters[UC_COUNT_TB_RESTORE_LOOKUPS]++;
         tb = tcg_tb_lookup(tcg_ctx, host_pc);
         if (tb) {
             cpu_restore_state_from_tb(cpu, tb, host_pc, will_exit);
@@ -2220,7 +2221,12 @@ void embedder_restart_insn(CPUState *cpu, uintptr_t retaddr, bool remember)
     int index;
     uint64_t pc;
 
-    if (!retaddr || !(tb = tcg_tb_lookup(tcg_ctx, retaddr))) {
+    if (!retaddr) {
+        return;
+    }
+    uc->embedder_exit_counters[UC_COUNT_TB_RESTART_LOOKUPS]++;
+    tb = tcg_tb_lookup(tcg_ctx, retaddr);
+    if (!tb) {
         return;
     }
     index = embedder_insn_index(tb, retaddr);
