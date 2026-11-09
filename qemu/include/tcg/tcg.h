@@ -699,8 +699,6 @@ struct TCGContext {
     TCGv_ptr cpu_env;
     struct tcg_region_state region;
     GTree *tree;
-    /* Most recently resolved host PC; cleared before its TB is removed. */
-    TranslationBlock *last_lookup_tb;
     TCGRegSet tcg_target_available_regs[TCG_TYPE_COUNT];
     TCGRegSet tcg_target_call_clobber_regs;
     int *indirect_reg_alloc_order;
