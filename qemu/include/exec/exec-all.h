@@ -393,7 +393,9 @@ uint32_t uc_embedder_tci_wasm_threshold(void);
 void uc_embedder_tci_wasm_init(TranslationBlock *tb);
 void uc_embedder_tci_wasm_invalidate(struct uc_struct *uc, TranslationBlock *tb);
 #endif
-void tb_phys_invalidate(TCGContext *tcg_ctx, TranslationBlock *tb, tb_page_addr_t page_addr);
+void tb_phys_invalidate(TCGContext *tcg_ctx, TranslationBlock *tb,
+                        tb_page_addr_t page_addr,
+                        enum uc_embedder_exit_counter cause);
 TranslationBlock *tb_htable_lookup(CPUState *cpu, target_ulong pc,
                                    target_ulong cs_base, uint32_t flags,
                                    uint32_t cf_mask);

@@ -132,7 +132,8 @@ static void cpu_exec_nocache(CPUState *cpu, int max_cycles,
     cpu_tb_exec(cpu, tb);
 
     mmap_lock();
-    tb_phys_invalidate(cpu->uc->tcg_ctx, tb, -1);
+    tb_phys_invalidate(cpu->uc->tcg_ctx, tb, -1,
+                       UC_COUNT_INVALIDATE_EXEC_NOCACHE);
     mmap_unlock();
     tcg_tb_remove(cpu->uc->tcg_ctx, tb);
 }

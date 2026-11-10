@@ -197,7 +197,7 @@ static inline gboolean uc_exit_invalidate_iter(gpointer key, gpointer val, gpoin
         // While tb_invalidate_phys_range invalides [start, end)
         //
         // This function is designed to used with g_tree_foreach
-        uc->uc_invalidate_tb(uc, exit - 1, 1);
+        uc_invalidate_exit_tb(uc, exit - 1);
     }
 
     return false;

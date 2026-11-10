@@ -51,7 +51,8 @@ void qemu_ram_free(struct uc_struct *uc, RAMBlock *block);
 #define DIRTY_CLIENTS_ALL     ((1 << DIRTY_MEMORY_NUM) - 1)
 #define DIRTY_CLIENTS_NOCODE  (DIRTY_CLIENTS_ALL & ~(1 << DIRTY_MEMORY_CODE))
 
-void tb_invalidate_phys_range(struct uc_struct *uc, ram_addr_t start, ram_addr_t end);
+void tb_invalidate_phys_range(struct uc_struct *uc, ram_addr_t start, ram_addr_t end,
+                              enum uc_embedder_exit_counter cause);
 
 static inline bool cpu_physical_memory_get_dirty(ram_addr_t start,
                                                  ram_addr_t length,

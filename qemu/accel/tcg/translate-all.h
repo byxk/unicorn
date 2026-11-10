@@ -29,8 +29,12 @@ void page_collection_unlock(struct page_collection *set);
 void tb_invalidate_phys_page_fast(struct uc_struct *uc, struct page_collection *pages,
                                   tb_page_addr_t start, int len,
                                   uintptr_t retaddr);
-void tb_invalidate_phys_page_range(struct uc_struct *uc, tb_page_addr_t start, tb_page_addr_t end);
-void tb_invalidate_phys_range(struct uc_struct *uc, ram_addr_t start, ram_addr_t end);
+void tb_invalidate_phys_page_range(struct uc_struct *uc, tb_page_addr_t start,
+                                   tb_page_addr_t end,
+                                   enum uc_embedder_exit_counter cause);
+void tb_invalidate_phys_range(struct uc_struct *uc, ram_addr_t start, ram_addr_t end,
+                              enum uc_embedder_exit_counter cause);
+void uc_invalidate_exit_tb(struct uc_struct *uc, uint64_t addr);
 void tb_check_watchpoint(CPUState *cpu, uintptr_t retaddr);
 
 #endif /* TRANSLATE_ALL_H */

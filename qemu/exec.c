@@ -622,7 +622,8 @@ void tb_invalidate_phys_addr(AddressSpace *as, hwaddr addr, MemTxAttrs attrs)
     }
 
     ram_addr = memory_region_get_ram_addr(mr) + addr;
-    tb_invalidate_phys_page_range(as->uc, ram_addr, ram_addr + 1);
+    tb_invalidate_phys_page_range(as->uc, ram_addr, ram_addr + 1,
+                                  UC_COUNT_INVALIDATE_PHYSICAL_WRITE);
 }
 
 static void breakpoint_invalidate(CPUState *cpu, target_ulong pc)

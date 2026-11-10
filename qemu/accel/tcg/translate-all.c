@@ -408,7 +408,8 @@ bool cpu_restore_state(CPUState *cpu, uintptr_t host_pc, bool will_exit)
             cpu_restore_state_from_tb(cpu, tb, host_pc, will_exit);
             if (tb_cflags(tb) & CF_NOCACHE) {
                 /* one-shot translation, invalidate it immediately */
-                tb_phys_invalidate(tcg_ctx, tb, -1);
+                tb_phys_invalidate(tcg_ctx, tb, -1,
+                                   UC_COUNT_INVALIDATE_RESTORE_NOCACHE);
                 tcg_tb_remove(tcg_ctx, tb);
             }
             r = true;
@@ -1181,7 +1182,9 @@ static void uc_tb_flush(struct uc_struct *uc) {
     tb_exec_lock(uc);
 }
 
-static void uc_invalidate_tb(struct uc_struct *uc, uint64_t start_addr, size_t len) 
+static void uc_invalidate_tb_cause(struct uc_struct *uc, uint64_t start_addr,
+                                   size_t len,
+                                   enum uc_embedder_exit_counter cause)
 {
     tb_page_addr_t start, end;
 
@@ -1211,7 +1214,17 @@ static void uc_invalidate_tb(struct uc_struct *uc, uint64_t start_addr, size_t l
         return;
     }
 
-    tb_invalidate_phys_range(uc, start, end);
+    tb_invalidate_phys_range(uc, start, end, cause);
+}
+
+static void uc_invalidate_tb(struct uc_struct *uc, uint64_t start_addr, size_t len)
+{
+    uc_invalidate_tb_cause(uc, start_addr, len, UC_COUNT_INVALIDATE_EMBEDDER);
+}
+
+void uc_invalidate_exit_tb(struct uc_struct *uc, uint64_t addr)
+{
+    uc_invalidate_tb_cause(uc, addr, 1, UC_COUNT_INVALIDATE_EXIT_ADDRESS);
 }
 
 static uc_err uc_gen_tb(struct uc_struct *uc, uint64_t addr, uc_tb *out_tb) 
@@ -1555,7 +1568,9 @@ static inline void tb_jmp_unlink(TranslationBlock *dest)
  * In !user-mode, if @rm_from_page_list is set, call with the TB's pages'
  * locks held.
  */
-static void do_tb_phys_invalidate(TCGContext *tcg_ctx, TranslationBlock *tb, bool rm_from_page_list)
+static void do_tb_phys_invalidate(TCGContext *tcg_ctx, TranslationBlock *tb,
+                                  bool rm_from_page_list,
+                                  enum uc_embedder_exit_counter cause)
 {
     CPUState *cpu = tcg_ctx->uc->cpu;
     struct uc_struct *uc = tcg_ctx->uc;
@@ -1565,6 +1580,7 @@ static void do_tb_phys_invalidate(TCGContext *tcg_ctx, TranslationBlock *tb, boo
     bool code_gen_locked;
 
     uc->embedder_exit_counters[UC_COUNT_TRANSLATION_INVALIDATIONS]++;
+    uc->embedder_exit_counters[cause]++;
     /* Cached indirect targets may name this translation. */
     uc->embedder_tb_epoch++;
     assert_memory_lock();
@@ -1617,23 +1633,26 @@ static void do_tb_phys_invalidate(TCGContext *tcg_ctx, TranslationBlock *tb, boo
     tb_exec_change(uc, code_gen_locked);
 }
 
-static void tb_phys_invalidate__locked(TCGContext *tcg_ctx, TranslationBlock *tb)
+static void tb_phys_invalidate__locked(TCGContext *tcg_ctx, TranslationBlock *tb,
+                                       enum uc_embedder_exit_counter cause)
 {
-    do_tb_phys_invalidate(tcg_ctx, tb, true);
+    do_tb_phys_invalidate(tcg_ctx, tb, true, cause);
 }
 
 /* invalidate one TB
  *
  * Called with mmap_lock held in user-mode.
  */
-void tb_phys_invalidate(TCGContext *tcg_ctx, TranslationBlock *tb, tb_page_addr_t page_addr)
+void tb_phys_invalidate(TCGContext *tcg_ctx, TranslationBlock *tb,
+                        tb_page_addr_t page_addr,
+                        enum uc_embedder_exit_counter cause)
 {
     if (page_addr == -1 && tb->page_addr[0] != -1) {
         page_lock_tb(tcg_ctx->uc, tb);
-        do_tb_phys_invalidate(tcg_ctx, tb, true);
+        do_tb_phys_invalidate(tcg_ctx, tb, true, cause);
         page_unlock_tb(tcg_ctx->uc, tb);
     } else {
-        do_tb_phys_invalidate(tcg_ctx, tb, false);
+        do_tb_phys_invalidate(tcg_ctx, tb, false, cause);
     }
 }
 
@@ -1953,7 +1972,8 @@ static void
 tb_invalidate_phys_page_range__locked(struct uc_struct *uc, struct page_collection *pages,
                                       PageDesc *p, tb_page_addr_t start,
                                       tb_page_addr_t end,
-                                      uintptr_t retaddr)
+                                      uintptr_t retaddr,
+                                      enum uc_embedder_exit_counter cause)
 {
     TranslationBlock *tb;
     tb_page_addr_t tb_start, tb_end;
@@ -2016,7 +2036,7 @@ tb_invalidate_phys_page_range__locked(struct uc_struct *uc, struct page_collecti
                                      &current_flags);
             }
 #endif /* TARGET_HAS_PRECISE_SMC */
-            tb_phys_invalidate__locked(uc->tcg_ctx, tb);
+            tb_phys_invalidate__locked(uc->tcg_ctx, tb, cause);
         }
     }
 
@@ -2046,7 +2066,9 @@ tb_invalidate_phys_page_range__locked(struct uc_struct *uc, struct page_collecti
  *
  * Called with mmap_lock held for user-mode emulation
  */
-void tb_invalidate_phys_page_range(struct uc_struct *uc, tb_page_addr_t start, tb_page_addr_t end)
+void tb_invalidate_phys_page_range(struct uc_struct *uc, tb_page_addr_t start,
+                                   tb_page_addr_t end,
+                                   enum uc_embedder_exit_counter cause)
 {
     struct page_collection *pages;
     PageDesc *p;
@@ -2058,7 +2080,7 @@ void tb_invalidate_phys_page_range(struct uc_struct *uc, tb_page_addr_t start, t
         return;
     }
     pages = page_collection_lock(uc, start, end);
-    tb_invalidate_phys_page_range__locked(uc, pages, p, start, end, 0);
+    tb_invalidate_phys_page_range__locked(uc, pages, p, start, end, 0, cause);
     page_collection_unlock(pages);
 }
 
@@ -2071,7 +2093,8 @@ void tb_invalidate_phys_page_range(struct uc_struct *uc, tb_page_addr_t start, t
  *
  * Called with mmap_lock held for user-mode emulation.
  */
-void tb_invalidate_phys_range(struct uc_struct *uc, ram_addr_t start, ram_addr_t end)
+void tb_invalidate_phys_range(struct uc_struct *uc, ram_addr_t start, ram_addr_t end,
+                              enum uc_embedder_exit_counter cause)
 {
     struct page_collection *pages;
     tb_page_addr_t next;
@@ -2089,7 +2112,8 @@ void tb_invalidate_phys_range(struct uc_struct *uc, ram_addr_t start, ram_addr_t
         if (pd == NULL) {
             continue;
         }
-        tb_invalidate_phys_page_range__locked(uc, pages, pd, start, bound, 0);
+        tb_invalidate_phys_page_range__locked(uc, pages, pd, start, bound, 0,
+                                              cause);
     }
     page_collection_unlock(pages);
 }
@@ -2130,7 +2154,8 @@ void tb_invalidate_phys_page_fast(struct uc_struct *uc, struct page_collection *
     } else {
     do_invalidate:
         tb_invalidate_phys_page_range__locked(uc, pages, p, start, start + len,
-                                              retaddr);
+                                              retaddr,
+                                              UC_COUNT_INVALIDATE_GUEST_STORE);
     }
 }
 
@@ -2146,7 +2171,7 @@ void tb_check_watchpoint(CPUState *cpu, uintptr_t retaddr)
     if (tb) {
         /* We can use retranslation to find the PC.  */
         cpu_restore_state_from_tb(cpu, tb, retaddr, true);
-        tb_phys_invalidate(tcg_ctx, tb, -1);
+        tb_phys_invalidate(tcg_ctx, tb, -1, UC_COUNT_INVALIDATE_WATCHPOINT);
     } else {
         /* The exception probably happened in a helper.  The CPU state should
            have been saved before calling it. Fetch the PC from there.  */
@@ -2158,7 +2183,8 @@ void tb_check_watchpoint(CPUState *cpu, uintptr_t retaddr)
         cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
         addr = get_page_addr_code(env, pc);
         if (addr != -1) {
-            tb_invalidate_phys_range(cpu->uc, addr, addr + 1);
+            tb_invalidate_phys_range(cpu->uc, addr, addr + 1,
+                                     UC_COUNT_INVALIDATE_WATCHPOINT);
         }
     }
 }
@@ -2241,7 +2267,7 @@ void embedder_restart_insn(CPUState *cpu, uintptr_t retaddr, bool remember)
             uc->embedder_io_pcs = g_hash_table_new(NULL, NULL);
         }
         g_hash_table_insert(uc->embedder_io_pcs, (gpointer)(uintptr_t)pc, (gpointer)1);
-        tb_phys_invalidate(tcg_ctx, tb, -1);
+        tb_phys_invalidate(tcg_ctx, tb, -1, UC_COUNT_INVALIDATE_RESTART);
     }
     if (uc->embedder_restart) {
         uc->embedder_restart(uc->embedder_filter_user, pc);
@@ -2300,7 +2326,8 @@ void cpu_io_recompile(CPUState *cpu, uintptr_t retaddr)
         if (tb->orig_tb) {
             /* Invalidate original TB if this TB was generated in
              * cpu_exec_nocache() */
-            tb_phys_invalidate(tcg_ctx, tb->orig_tb, -1);
+            tb_phys_invalidate(tcg_ctx, tb->orig_tb, -1,
+                               UC_COUNT_INVALIDATE_IO_RECOMPILE);
         }
         tcg_tb_remove(tcg_ctx, tb);
     }
