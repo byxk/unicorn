@@ -6,6 +6,7 @@
 #endif
 #define tcg_flush_physical_tlb tcg_flush_physical_tlb_ppc
 #define embedder_restart_insn embedder_restart_insn_ppc
+#define uc_invalidate_exit_tb uc_invalidate_exit_tb_ppc
 #define tcg_qemu_tb_exec tcg_qemu_tb_exec_ppc
 #define tci_tb_ptr tci_tb_ptr_ppc
 #define helper_tci_hookcode helper_tci_hookcode_ppc
