@@ -5,6 +5,7 @@
 #define UNICORN_ARCH_POSTFIX _s390x
 #endif
 #define tcg_flush_physical_tlb tcg_flush_physical_tlb_s390x
+#define uc_invalidate_exit_tb uc_invalidate_exit_tb_s390x
 #define embedder_restart_insn embedder_restart_insn_s390x
 #define uc_invalidate_exit_tb uc_invalidate_exit_tb_s390x
 #define tcg_qemu_tb_exec tcg_qemu_tb_exec_s390x
